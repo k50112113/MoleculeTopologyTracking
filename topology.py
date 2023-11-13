@@ -1,6 +1,3 @@
-
-import torch
-torch.set_default_tensor_type(torch.DoubleTensor)
 from ase.io import read, write, Trajectory
 from ase import Atoms
 from ase.optimize import BFGS, FIRE, LBFGSLineSearch
@@ -9,28 +6,6 @@ import os
 import sys
 import warnings
 warnings.filterwarnings("ignore")
-
-def set_nequip_calc(atoms, model_path, device = 'cpu'):
-    from nequip.ase import NequIPCalculator
-    atomic_numbers = atoms.get_atomic_numbers()
-    chemical_symbols = atoms.get_chemical_symbols()
-    chem_map = {int(atomic_numbers[i]): chemical_symbols[i] for i in range(len(atomic_numbers))}
-    chemical_symbols_list = [chem_map[v] for v in np.unique(atomic_numbers)]
-    species_to_type_name = {v : v for v in chemical_symbols_list}
-    atoms.calc = NequIPCalculator.from_deployed_model(model_path=model_path, device = device, species_to_type_name = species_to_type_name, set_global_options = True)
-
-def minimize(atoms):
-    opt = LBFGSLineSearch(atoms, trajectory='opt.traj', logfile=None)
-    opt.run(fmax=0.01)
-    opt_traj = read("opt.traj", index = ":")
-    number_of_atoms = atoms.get_number_of_atoms()
-    new_opt_traj = [opt_traj[0]]
-    e_thres = 0.01 # 10 meV/atom
-    for i in range(1, len(opt_traj) - 1):
-        e_diff = np.absolute(opt_traj[i].get_potential_energies() - new_opt_traj[-1].get_potential_energies())
-        if (e_diff > e_thres).any(): new_opt_traj.append(opt_traj[i])
-    new_opt_traj.append(opt_traj[-1])
-    return new_opt_traj
 
 def get_contact_matrix(atoms, cutoff):
     number_of_atoms = atoms.get_number_of_atoms()
@@ -70,17 +45,9 @@ def get_molecule_set(edge_list, number_of_atoms, molecule_set = None, atom_belon
     return molecule_set, atom_belong_to_molecule
 
 cutoff = 1.2
-itr = int(sys.argv[1])
-model_itr = int(sys.argv[2])
-if model_itr > -1:
-    model_path = f"../itr_{model_itr}/ensemble_0/model.pth"
-    output_dir = f"{itr}-{model_itr}"
-else:
-    model_path = None
-    output_dir = f"{itr}-no-opt"
-
-filename_list = os.popen(f"ls ../itr_{itr}/sample_*_trajectory.extxyz").read().split('\n')
-# os.system(f"rm -rf {output_dir}")
+traj_dir = int(sys.argv[1])
+output_dir = int(sys.argv[2])
+filename_list = os.popen(f"ls {traj_dir}/*.extxyz").read().split('\n')
 os.system(f"mkdir -p {output_dir}")
 filename_list.pop()
 for filename in filename_list:
@@ -93,24 +60,12 @@ for filename in filename_list:
     data = read(filename, format = "extxyz", index = ":")
     number_of_atoms = data[0].get_number_of_atoms()
 
-    # minimize the first frame, prepend the reversed traj to Subascent sample traj
-    atoms = data[0].copy()
-    set_nequip_calc(atoms, model_path, 'cuda')
-    opt_traj = minimize(atoms)
-    opt_traj = opt_traj[::-1]
-    data = opt_traj + data
-
     # create ref contact matrix, edge list, molecule set
     ref_contact_matrix, ref_edge_list = get_contact_matrix(data[0], cutoff)
     total_molecule_set, total_atom_belong_to_molecule = get_molecule_set(ref_edge_list, number_of_atoms)
     ref_molecule_set = {v: total_molecule_set[v][:] for v in total_molecule_set.keys()}
     ref_atom_belong_to_molecule = total_atom_belong_to_molecule[:]
     previous_contact_matrix = np.copy(ref_contact_matrix)
-    
-    # minimize the last frame, append the traj to Subascent sample traj
-    atoms.set_positions(data[-1].get_positions())
-    opt_traj = minimize(atoms)
-    data = data + opt_traj
 
     # create final contact matrix, edge list, and update ref molecule set from final molecule set
     contact_matrix, edge_list = get_contact_matrix(data[-1], cutoff)
@@ -177,64 +132,3 @@ for filename in filename_list:
 
     output_filename = filename[filename.rindex("/") + 1:filename.rindex(".extxyz")] + "-cluster.extxyz"
     write(f"{output_dir}/{output_filename}", data, format = 'extxyz')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
